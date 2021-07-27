@@ -59,7 +59,7 @@ WITH
                             0) >=
                         ROUND (
                             TO_NUMBER ((SYSDATE - LAGG2.MAXX) * 24 * 60 * 60),
-                            0)) ----  Sysdate - Run&Restart >= Sysdate - Error
+                            0)) ----  Sysdate - Run Restart >= Sysdate - Error
                    AND (    TRIM (ugr.STATUS) = 'R'
                         AND TRIM (LAGG2.SESS_STATUS) = 'E'))
              THEN
