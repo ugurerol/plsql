@@ -1,0 +1,117 @@
+SELECT           
+      pit.CONTEXT_CODE
+    , pit.LOAD_PLAN_NAME
+    , pit.LP_START_DATE
+    , pit.LP_END_DATE  
+    , pit.SESS_STEP_BEG
+    , pit.LP_STEP_NAME
+    , pit.SESS_DUR_mi
+    , pit.SD_AVG_mi
+FROM
+(
+SELECT distinct
+      INST1.I_LP_INST
+    , INST1.I_LOAD_PLAN
+    , INST1.I_LP_STEP        
+    , ugr.CONTEXT_CODE
+    , ugr.LOAD_PLAN_NAME
+    , TO_CHAR(ugr.START_DATE, 'DD-MM-YYYY HH24:MI') LP_START_DATE 
+    , TO_CHAR(ugr.END_DATE, 'DD-MM-YYYY HH24:MI') LP_END_DATE  
+    , INST1.LP_STEP_TYPE
+    , ugr.STATUS LP_STATUS
+    , TO_CHAR(DURATION1.SESS_BEG, 'DD-MM-YYYY HH24:MI') SESS_STEP_BEG 
+    , INST1.LP_STEP_NAME 
+    , SD_AVG1.SESS_STATUS
+    , DURATION1.SESS_DUR   
+    , DURATION2.SESS_DUR_mi 
+    , SD_AVG1.SD_AVG SD_AVG_mi 
+FROM
+    (
+    SELECT
+        LPI_RUN.I_LP_INST,
+        LPI_RUN.LOAD_PLAN_NAME,
+        LPI_RUN.CONTEXT_CODE,
+        MIN(LPI_RUN.START_DATE) OVER (PARTITION BY LPI_RUN.I_LP_INST) AS START_DATE, --min. START_DATE,
+        CASE WHEN TRIM(LPI_RUN.STATUS)='R' THEN TO_DATE('','dd/mm/yyyy hh24:mi:ss') ELSE LPI_RUN.END_DATE END AS END_DATE,
+        LPI_RUN.STATUS,
+        MAX(LPI_RUN.NB_RUN) OVER (PARTITION BY LPI_RUN.I_LP_INST ORDER BY LPI_RUN.NB_RUN desc) AS RN, --LAST_STATUS
+        ROW_NUMBER() OVER (PARTITION BY LPI_RUN.I_LP_INST ORDER BY NB_RUN DESC) AS RN_DUMMY, --DUMMY_VARIABLE
+        LPI_RUN.NB_RUN NB_RUN,
+        LPI_RUN.START_DATE START_DATE_DUMMY,
+        SUM(LPI_RUN.DURATION) OVER (PARTITION BY LPI_RUN.I_LP_INST) AS DURATION,
+        LPI_RUN.ERROR_MESSAGE
+    FROM
+        myRepoName.SNP_LPI_RUN LPI_RUN
+    WHERE 1=1
+    ) ugr
+LEFT JOIN (
+           SELECT
+                 LP_INST.I_LP_INST
+                ,LP_INST.I_LOAD_PLAN
+                ,LP_INST.LOAD_PLAN_NAME
+                ,LPI_STEP.I_LP_STEP
+                ,LPI_STEP.LP_STEP_NAME
+                ,LPI_STEP.LP_STEP_TYPE
+            FROM myRepoName.SNP_LP_INST LP_INST,
+                 myRepoName.SNP_LPI_STEP LPI_STEP
+            WHERE 1=1
+            AND LP_INST.I_LP_INST = LPI_STEP.I_LP_INST (+)
+          ) INST1
+          ON ugr.I_LP_INST = INST1.I_LP_INST
+LEFT JOIN (
+           SELECT LPI_STEP_LOG.I_LP_INST
+                 ,LPI_STEP_LOG.I_LP_STEP
+                 ,SESS1.*
+            FROM myRepoName.SNP_LPI_STEP_LOG LPI_STEP_LOG,
+                 myRepoName.SNP_SESSION SESS1
+            WHERE 1 = 1
+            AND SESS1.SESS_NO = LPI_STEP_LOG.SESS_NO                        
+           ) DURATION1
+           ON INST1.I_LP_INST = DURATION1.I_LP_INST AND INST1.I_LP_STEP = DURATION1.I_LP_STEP
+LEFT JOIN (
+           SELECT LPI_STEP_LOG.I_LP_INST  
+                 ,LPI_STEP_LOG.I_LP_STEP
+                 ,SESS1.SESS_NAME
+                 ,SESS1.SESS_STATUS
+                 ,SESS1.SESS_DUR
+                 ,(CEIL(ROUND(AVG(SESS1.SESS_DUR/60),0)) )SESS_DUR_mi --||' mi') SESS_DUR_mi
+            FROM myRepoName.SNP_LPI_STEP_LOG LPI_STEP_LOG,
+                 myRepoName.SNP_SESSION SESS1
+            WHERE 1 = 1
+            AND SESS1.SESS_NO = LPI_STEP_LOG.SESS_NO
+            AND SESS1.SESS_STATUS = 'D' 
+            GROUP BY LPI_STEP_LOG.I_LP_INST, LPI_STEP_LOG.I_LP_STEP, SESS1.SESS_DUR, SESS1.SESS_NAME, SESS1.SESS_STATUS                  
+           ) DURATION2
+           ON INST1.I_LP_INST = DURATION2.I_LP_INST AND INST1.I_LP_STEP = DURATION2.I_LP_STEP
+INNER JOIN (
+           SELECT SESSIONS_Done.I_LP_INST, SESSIONS_Done.SESS_NAME, SESSIONS_Done.SESS_STATUS,
+                  (CEIL(ROUND(AVG(SESSIONS_D.SESS_DUR/60),0)) )SD_AVG --||' mi') SD_AVG
+           FROM myRepoName.SNP_SESSION SESSIONS_D,
+           (SELECT LPI_STEP_LOG.I_LP_INST, LPI_STEP_LOG.I_LP_STEP, SESS1.SESS_NAME, SESS1.CONTEXT_CODE, SESS1.SESS_STATUS 
+           FROM myRepoName.SNP_LPI_STEP_LOG LPI_STEP_LOG,
+               myRepoName.SNP_SESSION SESS1
+           WHERE 1 = 1
+               AND SESS1.SESS_NO = LPI_STEP_LOG.SESS_NO   --INNER_JOIN
+               AND SESS1.SESS_STATUS in ('D', 'R')) SESSIONS_Done
+           WHERE 1=1
+           AND SESSIONS_D.SESS_NAME = SESSIONS_Done.SESS_NAME
+           AND SESSIONS_D.CONTEXT_CODE = SESSIONS_Done.CONTEXT_CODE
+           AND SESSIONS_D.SESS_STATUS='D'
+           GROUP BY SESSIONS_Done.I_LP_INST, SESSIONS_Done.SESS_NAME, SESSIONS_Done.SESS_STATUS
+          ) SD_AVG1
+          ON ugr.I_LP_INST=SD_AVG1.I_LP_INST
+             AND INST1.LP_STEP_NAME=SD_AVG1.SESS_NAME
+WHERE 1=1
+    AND ugr.RN_DUMMY=1
+    AND DURATION1.SESS_DUR is not NULL
+----------Changing_Area----------
+    AND ugr.CONTEXT_CODE IN ('myContext')  -- context name?
+    AND INST1.LOAD_PLAN_NAME IN ('myLoadPlanName')  -- load plan name?
+    AND TO_NUMBER( TO_CHAR(ugr.START_DATE, 'YYYYMMDD') ) = TO_NUMBER( TO_CHAR( SYSDATE - 1, 'YYYYMMDD'))  -- how many days ago?
+----------Changing_Area----------
+ORDER BY
+    SESS_STEP_BEG,
+    INST1.I_LP_STEP
+) pit
+WHERE 1=1
+--AND pit.SESS_DUR_mi > pit.SD_AVG_mi -- ony for long steps (default close) 
