@@ -327,6 +327,7 @@ WITH
              WHERE     1 = 1
                    AND SESS1.SESS_NO = LPI_STEP_LOG.SESS_NO       --INNER_JOIN
                    AND SESS1.SESS_STATUS = 'R'
+                   AND LPI_STEP_LOG.STATUS = 'R'  -- prevent for failed step\task
           GROUP BY LPI_STEP_LOG.I_LP_INST) LAGG
              ON ugr.I_LP_INST = LAGG.I_LP_INST
          LEFT JOIN
