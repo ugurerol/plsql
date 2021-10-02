@@ -319,7 +319,7 @@ WITH
                        WITHIN GROUP (ORDER BY LPI_STEP_LOG.I_LP_INST)
                        SESSIONS,
                    (   CEIL (
-                           ROUND ((SYSDATE - MIN (SESS1.SESS_BEG)) * 24 * 60, 2))
+                           ROUND ((SYSDATE - MIN (SESS1.LAST_DATE)) * 24 * 60, 2))  ---- SESS_BEG -> LAST_DATE
                     || ' mi')
                        AS SESS_DUR
               FROM ODI_REPO_NAME.SNP_LPI_STEP_LOG LPI_STEP_LOG,
